@@ -1,5 +1,4 @@
-﻿using System.Linq;
-using System.Collections.Generic;
+using System.Linq;
 using dnlib.DotNet;
 using dnlib.DotNet.Emit;
 
@@ -7,121 +6,112 @@ namespace Excess_Nop_Remover
 {
     internal class Remover
     {
-        public static void NopRemover(ModuleDefMD modulee)
+        public static void NopRemover(ModuleDefMD module)
         {
-            foreach (TypeDef typeDef in modulee.Types)
+            foreach (var typeDef in module.Types)
             {
-                foreach (MethodDef methodDef in typeDef.Methods)
+                foreach (var methodDef in typeDef.Methods)
                 {
                     if (methodDef.HasBody)
-                    {
                         RemoveUnusedNops(methodDef);
-                    }
                 }
             }
         }
 
-        public static void RemoveUnusedNops(MethodDef MethodDef)
+        private static void RemoveUnusedNops(MethodDef methodDef)
         {
-            if (MethodDef.HasBody)
+            if (!methodDef.HasBody)
+                return;
+
+            for (var i = 0; i < methodDef.Body.Instructions.Count; ++i)
             {
-                for (int i = 0; i < MethodDef.Body.Instructions.Count; i++)
-                {
-                    Instruction instruction = MethodDef.Body.Instructions[i];
-                    if (instruction.OpCode == OpCodes.Nop)
-                    {
-                        if (!IsNopBranchTarget(MethodDef, instruction))
-                        {
-                            if (!IsNopSwitchTarget(MethodDef, instruction))
-                            {
-                                if (!IsNopExceptionHandlerTarget(MethodDef, instruction))
-                                {
-                                    MethodDef.Body.Instructions.RemoveAt(i);
-                                    i--;
-                                }
-                            }
-                        }
-                    }
-                }
+                var instruction = methodDef.Body.Instructions[i];
+
+                if (instruction.OpCode != OpCodes.Nop)
+                    continue;
+
+                if (IsNopBranchTarget(methodDef, instruction))
+                    continue;
+
+                if (IsNopSwitchTarget(methodDef, instruction))
+                    continue;
+
+                if (IsNopExceptionHandlerTarget(methodDef, instruction))
+                    continue;
+
+                methodDef.Body.Instructions.RemoveAt(i);
+                i--;
             }
         }
 
-        private static bool IsNopBranchTarget(MethodDef MethodDef, Instruction NopInstr)
+        private static bool IsNopBranchTarget(MethodDef methodDef, Instruction nopInstr)
         {
-            for (int i = 0; i < MethodDef.Body.Instructions.Count; i++)
+            foreach (var instruction in methodDef.Body.Instructions)
             {
-                Instruction instruction = MethodDef.Body.Instructions[i];
-                if (instruction.OpCode.OperandType == OperandType.InlineBrTarget || instruction.OpCode.OperandType == OperandType.ShortInlineBrTarget)
+                switch (instruction.OpCode.OperandType)
                 {
-                    if (instruction.Operand != null)
-                    {
-                        Instruction instruction2 = (Instruction)instruction.Operand;
-                        if (instruction2 == NopInstr)
+                    case OperandType.InlineBrTarget:
+                    case OperandType.ShortInlineBrTarget:
                         {
-                            return true;
+                            if (instruction.Operand == null)
+                                continue;
+
+                            if ((Instruction)instruction.Operand == nopInstr)
+                                return true;
+
+                            break;
                         }
-                    }
                 }
             }
+
             return false;
         }
 
-        private static bool IsNopSwitchTarget(MethodDef MethodDef, Instruction NopInstr)
+        private static bool IsNopSwitchTarget(MethodDef methodDef, Instruction nopInstr)
         {
-            for (int i = 0; i < MethodDef.Body.Instructions.Count; i++)
+            foreach (var instruction in methodDef.Body.Instructions)
             {
-                Instruction instruction = MethodDef.Body.Instructions[i];
-                if (instruction.OpCode.OperandType == OperandType.InlineSwitch)
-                {
-                    if (instruction.Operand != null)
-                    {
-                        Instruction[] source = (Instruction[])instruction.Operand;
-                        if (source.Contains(NopInstr))
-                        {
-                            return true;
-                        }
-                    }
-                }
+                if (instruction.OpCode.OperandType != OperandType.InlineSwitch)
+                    continue;
+
+                if (instruction.Operand == null)
+                    continue;
+
+                var source = (Instruction[])instruction.Operand;
+
+                if (source.Contains(nopInstr))
+                    return true;
             }
+
             return false;
         }
 
-        private static bool IsNopExceptionHandlerTarget(MethodDef MethodDef, Instruction NopInstr)
+        private static bool IsNopExceptionHandlerTarget(MethodDef methodDef, Instruction nopInstr)
         {
-            bool result;
-            if (!MethodDef.Body.HasExceptionHandlers)
+            if (methodDef.Body.HasExceptionHandlers) 
+                return false;
+
+            var exceptionHandlers = methodDef.Body.ExceptionHandlers;
+
+            foreach (var exceptionHandler in exceptionHandlers)
             {
-                result = false;
+                if (exceptionHandler.FilterStart == nopInstr)
+                    return true;
+
+                if (exceptionHandler.HandlerEnd == nopInstr)
+                    return true;
+                
+                if (exceptionHandler.HandlerStart == nopInstr)
+                    return true;
+
+                if (exceptionHandler.TryEnd == nopInstr)
+                    return true;
+
+                if (exceptionHandler.TryStart == nopInstr)
+                    return true;
             }
-            else
-            {
-                IList<ExceptionHandler> exceptionHandlers = MethodDef.Body.ExceptionHandlers;
-                foreach (ExceptionHandler exceptionHandler in exceptionHandlers)
-                {
-                    if (exceptionHandler.FilterStart == NopInstr)
-                    {
-                        return true;
-                    }
-                    if (exceptionHandler.HandlerEnd == NopInstr)
-                    {
-                        return true;
-                    }
-                    if (exceptionHandler.HandlerStart == NopInstr)
-                    {
-                        return true;
-                    }
-                    if (exceptionHandler.TryEnd == NopInstr)
-                    {
-                        return true;
-                    }
-                    if (exceptionHandler.TryStart == NopInstr)
-                    {
-                        return true;
-                    }
-                }
-                result = false;
-            }
-            return result;
+
+            return false;
         }
     }
 }
